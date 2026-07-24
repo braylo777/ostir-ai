@@ -1,71 +1,72 @@
 <!doctype html><html lang="en" data-theme="light"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OSTIAR — Open Agentics for GPU Inference</title>
-<meta name="description" content="OSTIAR is the open, vendor-neutral orchestration layer between your models and your silicon — rack-scale GPU inference, open-core.">
-<meta property="og:title" content="OSTIAR — Open Agentics for GPU Inference">
-<meta property="og:description" content="The orchestration layer between your models and your silicon. Vendor-neutral, rack-scale, open-core.">
+<title>OSTIR — Quantized AI-Caching for CPU Inference</title>
+<meta name="description" content="OSTIR serves today's models on the CPU fleets you already own — Q4 weights, 3-bit KV cache, RAM→NVMe sessions. Open-core, priced per node.">
+<meta property="og:title" content="OSTIR — Quantized AI-Caching for CPU Inference">
+<meta property="og:description" content="Serve LLMs on the CPU fleets you already own. Quantized AI-caching — open-core, priced per node.">
 <meta property="og:type" content="website"><meta name="robots" content="index,follow">
 <link rel="icon" href="/assets/favicon.svg"><link rel="manifest" href="/site.webmanifest">
-<link rel="stylesheet" href="/assets/ostiar.css">
+<link rel="stylesheet" href="/assets/ostir.css">
 </head><body>
-<header class="nav"><a class="brand" href="/"><img src="/assets/mark.svg" width="26" height="26" alt=""><b>OSTIAR</b></a>
+<header class="nav"><a class="brand" href="/"><img src="/assets/mark.svg" width="26" height="26" alt=""><b>OSTIR</b></a>
   <nav><a href="#how">How it works</a><a href="#partners">Design partners</a>
   <button id="theme" class="ghost" aria-label="Toggle theme">◐</button></nav></header>
 
 <section class="hero"><div class="wrap">
-  <p class="eyebrow">OPEN · VENDOR-NEUTRAL · RACK-SCALE</p>
-  <h1>Open Agentics for <span class="ind">GPU Inference</span></h1>
-  <p class="lede">The orchestration layer between your models and your silicon. One rack, one endpoint — open-core, priced per GPU.</p>
+  <p class="eyebrow">CPU-NATIVE · QUANTIZED · SOVEREIGN</p>
+  <h1>Quantized AI-Caching for <span class="ind">CPU Inference</span></h1>
+  <p class="lede">Serve today's models on the CPU fleets you already own. Q4 weights, 3-bit KV cache, RAM→NVMe sessions — open-core, priced per node.</p>
   <div class="cta"><a class="btn" href="#partners">Request design-partner access</a><a class="lnk" href="#how">Read the thesis →</a></div>
   <canvas id="flow" height="220" aria-hidden="true"></canvas>
-  <p class="flowcap">MODEL → OSTIAR → COMPUTE · live admission flow</p>
+  <p class="flowcap">MODEL → OSTIR → CPU FLEET · live admission flow</p>
 </div></section>
 
 <section class="band"><div class="wrap">
-  <p class="eyebrow">01 · THE PROBLEM</p><h2>GPU optimization is the new bottleneck.</h2>
+  <p class="eyebrow">01 · THE PROBLEM</p><h2>Inference is a runaway bill that scales with success.</h2>
   <div class="cards">
-    <div class="card"><b class="stat">5%</b><p>avg GPU utilization across ~23k enterprise clusters.</p><span class="src">Cast AI, 2026</span></div>
-    <div class="card"><b class="stat">10×</b><p>gap between best-run and fleet-average GPU clusters.</p><span class="src">Cast AI, 2026</span></div>
-    <div class="card"><b class="stat">90%</b><p>of a recurring ML bill is now real-time inference.</p><span class="src">AWS, 2026</span></div>
+    <div class="card"><b class="stat">90%</b><p>of an AI system's lifetime cost is inference — training is the cheap part.</p><span class="src">FinOps Foundation, 2026</span></div>
+    <div class="card"><b class="stat">73%</b><p>of organizations report AI costs blew past their original budget.</p><span class="src">State of FinOps, 2026</span></div>
+    <div class="card"><b class="stat">15×</b><p>GPT-4: $78M to train, $2.3B in inference within two years.</p><span class="src">Stanford AI Index, 2025</span></div>
   </div></div></section>
 
 <section class="band alt"><div class="wrap">
-  <p class="eyebrow">02 · WHY NOW</p><h2>The future of orchestration is <span class="ind">open agentics</span>.</h2>
+  <p class="eyebrow">02 · WHY NOW</p><h2>Quantization is making <span class="ind">GPU-only inference</span> a dinosaur.</h2>
   <div class="cards">
-    <div class="card"><b class="stat">150k+</b><p>AI agents a single F-500 could run by 2028.</p><span class="src">Gartner, 2026</span></div>
-    <div class="card"><b class="stat">62%</b><p>of organizations are already experimenting with AI agents.</p><span class="src">McKinsey, 2025</span></div>
-    <div class="card"><b class="stat">1.70%</b><p>open models now trail closed — down from 8.04% in under a year.</p><span class="src">Stanford, 2025</span></div>
+    <div class="card"><b class="stat">6×</b><p>Google Research reports TurboQuant crushes KV caches to 3 bits — 6× less memory.</p><span class="src">Google Research, 2026</span></div>
+    <div class="card"><b class="stat">2×</b><p>AMX-enabled CPUs double LLM throughput — 57 vs 28 tok/s quantized.</p><span class="src">OpenMetal, 2025</span></div>
+    <div class="card"><b class="stat">55%</b><p>of enterprise inference now runs on-prem or edge — up from 12% in 2023.</p><span class="src">Industry survey, 2026</span></div>
   </div>
-  <p class="note">11 vendors now co-develop llm-d under the CNCF. The orchestration layer is going vendor-neutral — and the open, rack-scale lane is still unclaimed.</p></div></section>
+  <p class="note">The serving layer is moving on-prem, CPU-native, and open. The sovereign, quantized lane is still unclaimed.</p></div></section>
 
 <section id="how" class="band"><div class="wrap">
-  <p class="eyebrow">03 · THE SOLUTION</p><h2>One rack. One endpoint.</h2>
+  <p class="eyebrow">03 · THE SOLUTION</p><h2>One fleet. One endpoint.</h2>
   <div class="flowmap">
     <div class="col"><span class="lab">MODEL · REQUESTS</span><div class="chip">OpenAI-compatible API</div><div class="chip">Enterprise workloads</div><div class="chip">Agentic workflows</div></div>
-    <div class="core"><img src="/assets/mark.svg" width="54" height="54" alt="OSTIAR"><span>OSTIAR control plane</span></div>
-    <div class="col"><span class="lab">COMPUTE · GPU POOLS</span><div class="chip">prefill · 01–08</div><div class="chip">decode · 09–24</div><div class="chip">kv-cache · G1–G4</div></div>
+    <div class="core"><img src="/assets/mark.svg" width="54" height="54" alt="OSTIR"><span>OSTIR control plane</span></div>
+    <div class="col"><span class="lab">COMPUTE · CPU FLEET</span><div class="chip">weights · Q4</div><div class="chip">kv-cache · 3-bit</div><div class="chip">session · RAM→NVMe</div></div>
   </div>
-  <div class="mods"><span>bench · Py</span><span>router · Rust</span><span>scheduler · Py</span><span>kv · C++/HIP</span><span>deploy · Go</span><b class="apache">Apache-2.0 core</b></div>
-  <p class="note">Request routing · scheduling · KV-cache management · load balancing · GPU resource management — vendor-neutral across NVIDIA, AMD, and future accelerators. <em>This is what we're building.</em></p>
+  <div class="mods"><span>bench · Py</span><span>router · Rust</span><span>scheduler · Py</span><span>kv · C++/SIMD</span><span>deploy · Go</span><b class="apache">Apache-2.0 core</b></div>
+  <p class="diff">CPU-native · KV-cache-aware · air-gap-ready · vendor-neutral · open-source</p>
+  <p class="note">Precision-adaptive Q4 weights · 3-bit KV-cache · RAM→NVMe session tiering · fused CPU kernels — a sovereign serving layer for the hardware you already own. <em>This is what we're building.</em></p>
 </div></section>
 
 <section class="band alt"><div class="wrap">
-  <p class="eyebrow">04 · IN MOTION</p><h2>Utilization, recovered.</h2>
+  <p class="eyebrow">04 · IN MOTION</p><h2>The bill, brought down.</h2>
   <div class="dash">
-    <div class="tile"><span class="lab">GOODPUT @ SLO</span><canvas class="spark" data-metric="goodput" height="60"></canvas><b class="metric" data-out="goodput">—</b></div>
-    <div class="tile"><span class="lab">KV-CACHE HIT</span><canvas class="spark" data-metric="kv" height="60"></canvas><b class="metric" data-out="kv">—</b></div>
-    <div class="tile"><span class="lab">GPU UTILIZATION</span><canvas class="spark" data-metric="util" height="60"></canvas><b class="metric" data-out="util">—</b></div>
+    <div class="tile"><span class="lab">TOKENS / SEC · CPU</span><canvas class="spark" data-metric="toks" height="60"></canvas><b class="metric" data-out="toks">—</b></div>
+    <div class="tile"><span class="lab">KV-CACHE MEMORY</span><canvas class="spark" data-metric="kv" height="60"></canvas><b class="metric" data-out="kv">—</b></div>
+    <div class="tile"><span class="lab">COST / 1M TOKENS</span><canvas class="spark" data-metric="cost" height="60"></canvas><b class="metric" data-out="cost">—</b></div>
   </div>
   <p class="illus">◔ Illustrative simulation — not live telemetry.</p></div></section>
 
 <section id="partners" class="band cta-band"><div class="wrap narrow">
   <p class="eyebrow">05 · DESIGN PARTNERS</p><h2>Building in the open. Come build with us.</h2>
-  <p class="lede">We're onboarding a small group of design partners running non-hyperscaler GPU fleets. Open-core, Apache-2.0, priced per GPU. Request access below.</p>
+  <p class="lede">We're onboarding a small group of design partners running inference on their own CPU fleets — on-prem, air-gapped, or at the edge. Open-core, Apache-2.0, priced per node. Request access below.</p>
   <form id="dp" novalidate>
     <input type="email" name="email" required placeholder="you@company.com" autocomplete="email">
     <div class="row">
-      <select name="fleet_size"><option value="">GPU fleet size</option><option value="&lt;64">Under 64</option><option value="64-512">64–512</option><option value="512+">512+</option></select>
-      <select name="accelerator"><option value="">Accelerator</option><option value="amd-instinct">AMD Instinct</option><option value="nvidia">NVIDIA</option><option value="mixed">Mixed</option><option value="other">Other</option></select>
+      <select name="node_count"><option value="">Node count</option><option value="&lt;16">Under 16</option><option value="16-128">16–128</option><option value="128+">128+</option></select>
+      <select name="deployment"><option value="">Deployment</option><option value="on-prem">On-prem</option><option value="air-gapped">Air-gapped</option><option value="edge">Edge</option><option value="cloud">Cloud</option></select>
     </div>
     <input type="text" name="note" maxlength="500" placeholder="Anything we should know? (optional)">
     <button class="btn" type="submit">Request access</button>
@@ -73,8 +74,8 @@
   </form></div></section>
 
 <footer class="foot"><div class="wrap">
-  <a class="brand" href="/"><img src="/assets/mark.svg" width="22" height="22" alt=""><b>OSTIAR</b></a>
-  <span>Open Agentics for GPU Inference · Apache-2.0 · ostiar.ai</span>
+  <a class="brand" href="/"><img src="/assets/mark.svg" width="22" height="22" alt=""><b>OSTIR</b></a>
+  <span>Quantized AI-Caching for CPU Inference · Apache-2.0 · ostir.ai</span>
   <a href="/privacy.html">Privacy</a></div></footer>
 
 <script src="/assets/admission-flow.js" defer></script>
