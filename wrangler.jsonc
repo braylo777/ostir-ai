@@ -1,0 +1,17 @@
+{
+  // OSTIAR — static launch site (Assets) + design-partner funnel (D1), security-hardened.
+  "name": "ostiar-ai",
+  "compatibility_date": "2025-01-01",
+  "main": "worker.js",
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "ostiar-design-partners", "database_id": "REPLACE_AFTER_D1_CREATE" }
+  ],
+  "vars": { "DEV_MODE": "0" }
+  // ,"routes": [ { "pattern": "ostiar.ai", "custom_domain": true } ]   // uncomment when domain is wired
+}
