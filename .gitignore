@@ -1,0 +1,8 @@
+results/*.json
+results/*.csv
+__pycache__/
+*.pyc
+*.o
+kernels/bin/
+.walkthroughs/
+.venv/
