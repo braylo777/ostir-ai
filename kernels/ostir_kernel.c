@@ -58,6 +58,15 @@
  * it exists to measure. */
 #define BARRIER(x) __asm__ __volatile__("" :: "r"(x) : "memory")
 
+/* Non-temporal load capability, detected once and used both by the DRAM-leg
+ * reader and by the JSON receipt (which must not claim a capability the
+ * binary lacks). Declared here because counters_json() reports it. */
+#if defined(__clang__) && __has_builtin(__builtin_nontemporal_load)
+#define HAVE_NT_LOAD 1
+#else
+#define HAVE_NT_LOAD 0
+#endif
+
 /* ------------------------------------------------------------------ time */
 
 static uint64_t now_ns(void)
@@ -118,6 +127,9 @@ static counter_t g_counters[] = {
 };
 static const int N_COUNTERS = (int)(sizeof(g_counters) / sizeof(g_counters[0]));
 static int g_counters_ok = 0;
+
+/* OSTIR_NT_STREAM=1 makes the DRAM leg use non-temporal loads (§3.2). */
+static int g_nt_stream = 0;
 
 #ifdef __linux__
 static long perf_open(struct perf_event_attr *a, pid_t pid, int cpu,
@@ -199,6 +211,9 @@ static void counters_stop(void)
 
 static void counters_json(void)
 {
+    printf(", \"nt_stream\": %s, \"nt_loads_available\": %s",
+           g_nt_stream ? "true" : "false",
+           HAVE_NT_LOAD ? "true" : "false");
     printf(", \"counters_available\": %s", g_counters_ok ? "true" : "false");
     printf(", \"counters\": {");
     for (int i = 0; i < N_COUNTERS; i++)
@@ -332,6 +347,53 @@ static int batch_is_specialized(int nb)
     return 0;
 }
 
+/* Non-temporal streaming read.
+ *
+ * E4 measured the panel leg running 13-18% slower when a DRAM stream was
+ * interleaved with it: the streaming operand flows through L2 and evicts
+ * panel lines. §3.2 names this ("streaming pollution") and prescribes the
+ * fix -- non-temporal loads or explicit prefetch hints, so the streaming
+ * operand does not allocate in the cache it is merely passing through.
+ *
+ * This is that fix. If it works, beta_L2 stops depending on the mix, Thm
+ * 4.2's fixed-per-tier-bandwidth premise is restored, and the S(h) fit
+ * should tighten. If beta_L2 still varies with h afterwards, the pollution
+ * hypothesis was wrong and something else is going on -- equally worth
+ * knowing, which is why this is a switch and not a silent default.
+ */
+#if HAVE_NT_LOAD
+static inline __attribute__((always_inline))
+uint64_t stream_sum_nt(const uint64_t *restrict p, size_t words)
+{
+    uint64_t a0 = 0, a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0, a7 = 0;
+    const size_t bulk = words & ~(size_t)7;
+    size_t i = 0;
+    for (; i < bulk; i += 8) {
+        a0 += __builtin_nontemporal_load(p + i);
+        a1 += __builtin_nontemporal_load(p + i + 1);
+        a2 += __builtin_nontemporal_load(p + i + 2);
+        a3 += __builtin_nontemporal_load(p + i + 3);
+        a4 += __builtin_nontemporal_load(p + i + 4);
+        a5 += __builtin_nontemporal_load(p + i + 5);
+        a6 += __builtin_nontemporal_load(p + i + 6);
+        a7 += __builtin_nontemporal_load(p + i + 7);
+    }
+    for (; i < words; i++) a0 += p[i];
+    return (a0 + a1) + (a2 + a3) + (a4 + a5) + (a6 + a7);
+}
+#else
+static inline __attribute__((always_inline))
+uint64_t stream_sum_nt(const uint64_t *restrict p, size_t words)
+{
+    /* No non-temporal builtin here: fall back to a normal read with an NTA
+     * prefetch hint, and report nt_loads_available:false so the receipt does
+     * not imply a capability the binary lacks. */
+    for (size_t i = 0; i + 64 < words; i += 8)
+        __builtin_prefetch(p + i + 64, 0, 0);
+    return stream_sum(p, words);
+}
+#endif
+
 /* Mixed-residency reduction: dispatch CHUNK-sized reads to the resident panel
  * or the DRAM buffer so that exactly `h` of bytes come from the panel.
  * Bresenham keeps the interleave even, which matters -- a blocked interleave
@@ -412,7 +474,8 @@ static uint64_t mixed_sum(const uint64_t *restrict panel, size_t panel_words,
             pcur += cw;
         } else {
             if (dcur + cw > dram_words) dcur = 0;
-            acc += stream_sum(dram + dcur, cw);
+            acc += g_nt_stream ? stream_sum_nt(dram + dcur, cw)
+                               : stream_sum(dram + dcur, cw);
             dcur += cw;
         }
     }
@@ -770,6 +833,7 @@ static void usage(void)
 
 int main(int argc, char **argv)
 {
+    { const char *v = getenv("OSTIR_NT_STREAM"); g_nt_stream = v && *v == '1'; }
     if (argc < 2) { usage(); return 2; }
     const char *cmd = argv[1];
     const char *a2 = argc > 2 ? argv[2] : NULL;

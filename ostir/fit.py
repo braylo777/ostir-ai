@@ -164,12 +164,15 @@ def diagnose(h, S, resid, r_fixed, r2, r_free, r2_free=float("nan")) -> str:
                 f"free-r fit recovers r={r_free:.4f} against the measured "
                 f"{r_fixed:.4f} at R^2={r2_free:.4f}. Scale right, shape "
                 f"wrong -- no choice of r fixes this. Thm 4.2 assumes exactly "
-                f"two tiers at fixed per-tier bandwidth. Both an intermediate "
-                f"tier (a system-level cache or large shared LLC sitting "
-                f"between private L2 and DRAM) and memory-level parallelism "
-                f"(effective DRAM bandwidth rising as DRAM references thin "
-                f"out) produce this signature. Extend the harmonic model to "
-                f"three tiers before reading this as a refutation of Part IV."
+                f"two tiers at fixed per-tier bandwidth. On the machine this "
+                f"was developed against, per-leg timing showed exactly why: "
+                f"beta_L2 held flat within 5.5% while beta_DRAM rose 27% as "
+                f"h increased -- memory-level parallelism, DRAM references "
+                f"thinning out and overlapping better. Check the "
+                f"per_leg_bandwidth block in the receipt before reading this "
+                f"as a refutation of Part IV: if either tier's bandwidth "
+                f"depends on the mix, no constant r can fit and the failure "
+                f"is in the premise, not the harmonic form."
             )
 
     if not msgs:

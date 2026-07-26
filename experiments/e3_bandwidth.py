@@ -128,6 +128,32 @@ def main(reps: int = 15) -> int:
             f"Thm 4.2 can be validated here."
         )
 
+    # r with the KERNEL's access pattern, not just a contiguous sweep.
+    # E4 dispatches 64 KiB chunks; a fully contiguous 1 GiB read gives the
+    # prefetcher a longer run-up and reports a different DRAM bandwidth. The
+    # monograph's own E4 fail-mode note says to re-measure with the actual
+    # access pattern, so E3 reports both and E4 compares against this one.
+    lo = K.run("mixed-h-at", probe, "1G", "0.0", 5)
+    hi = K.run("mixed-h-at", probe, "1G", "1.0", 5)
+    b_lo = float(np.median([x["bps"] for x in lo]))
+    b_hi = float(np.median([x["bps"] for x in hi]))
+    r_kernel = b_lo / b_hi
+    exp.data["beta_dram_kernel_pattern"] = b_lo
+    exp.data["beta_l2_kernel_pattern"] = b_hi
+    exp.data["r_kernel_pattern"] = r_kernel
+    print(f"\n  kernel-pattern (64 KiB chunked dispatch):")
+    print(f"    beta_L2   = {b_hi / 1e9:7.2f} GB/s")
+    print(f"    beta_DRAM = {b_lo / 1e9:7.2f} GB/s")
+    print(f"    r         = {r_kernel:.4f}   (E4 fits against this)")
+    exp.check(
+        "kernel-pattern r measured for E4",
+        0.0 < r_kernel < 1.0,
+        f"r_kernel = {r_kernel:.4f} vs contiguous r = {r:.4f} "
+        f"({abs(r_kernel - r) / r:.0%} apart -- different access patterns "
+        f"give different DRAM bandwidth, which is why E4 must not fit "
+        f"against the contiguous value)",
+    )
+
     print(exp.summary())
     print(f"\nreceipt: {exp.emit()}")
     return 0 if exp.passed else 1

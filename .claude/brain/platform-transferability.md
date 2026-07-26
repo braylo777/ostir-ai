@@ -33,14 +33,23 @@ Memory-level parallelism (effective DRAM bandwidth rising as DRAM references
 thin out) produces the same signature. `fit.diagnose()` names this case
 explicitly so it is not misread as refuting Part IV.
 
-**The premise, measured.** E4 now times each leg separately, so the
-fixed-per-tier-bandwidth assumption is tested rather than assumed. Result: the
-panel leg runs 13% slower when interleaved with a DRAM stream (63.6 vs 73.0
-GB/s). This is §3.2's streaming pollution -- the streaming operand flows
-through L2 and evicts panel lines. No constant `r` can absorb a tier whose
-bandwidth depends on the mix, so residual structure is guaranteed. The
-composition law is fine; its premise is not. This also matters on Intel:
-counter-measured `h` alone cannot predict speedup, because the cost of a hit
-depends on the miss traffic running beside it.
+**The premise, measured -- and one retraction.** E4 times each leg
+separately, so the fixed-per-tier-bandwidth assumption is tested rather than
+assumed.
+
+I first measured the panel leg 13-18% slower when interleaved and attributed
+it to §3.2 streaming pollution. That was WRONG: it was contention from an IDE
+extension host at 134% CPU plus a browser. On a quiet machine the panel leg is
+flat to 5.5%. **Check `uptime` before believing any bandwidth result on a
+desktop OS** -- this cost a published-to-the-repo wrong conclusion.
+
+The real violation is on the DRAM side: beta_DRAM rises 42 -> 58 GB/s (27-34%)
+as h increases, monotonically, while beta_L2 stays flat. That is memory-level
+parallelism -- thinner DRAM reference streams overlap better. A single r
+cannot describe it, so E4's R^2 failure is a premise failure, not a refutation
+of the harmonic form.
+
+Do NOT try to "validate" the harmonic law from the per-leg decomposition:
+given per-leg times it is an algebraic identity and proves nothing.
 
 Related: [[monograph-errata]], [[measure-what-you-think-you-measure]].

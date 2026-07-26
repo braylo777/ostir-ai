@@ -101,22 +101,38 @@ hierarchical advantage measured +1.16 dB against a predicted +1.00. Prop
    min–max's 5.0 — and in that form it is decisive. §2.6 should assert the
    rate-aware version.
 
-**A fourth finding: Thm 4.2's premise is measurably false, and §3.2 already
-says why.** E4 times the panel leg and the DRAM leg separately, so per-tier
-bandwidth is measured rather than assumed. The panel leg runs at **63.6 GB/s
-when interleaved against 73.0 GB/s at h=1 — 13% slower**. The resident panel
-is slower *because* a DRAM stream is running alongside it: the streaming
-operand flows through L2 and evicts panel lines. That is exactly §3.2's
-streaming-pollution term, the same one that forces `eta` below 1.
+**A fourth finding: Thm 4.2's premise is measurably false — but on the DRAM
+side, not the cache side.**
 
-Thm 4.2 composes two tiers at *constant* per-tier bandwidth, so no value of
-`r` can absorb this and systematic residual structure follows necessarily.
-**The composition law is not what fails; its premise is.** The fix is the one
-§3.2 already prescribes — non-temporal loads or explicit prefetch hints for
-the streaming operand — or extending the law to `beta_L2(h)`. This is testable
-on the Intel target and matters there too: it means measured `h` from counters
-is not sufficient to predict speedup, because the *cost* of a hit is itself a
-function of the miss traffic.
+An earlier revision of this file attributed the effect to §3.2 streaming
+pollution, measuring the panel leg 13–18% slower when interleaved. **That was
+wrong** — it was contention from unrelated processes (an IDE extension host at
+134% CPU, plus a browser) competing for memory bandwidth. On a quiet machine
+the panel leg is flat to 5.5%, and a non-temporal-load implementation of
+§3.2's prescribed fix changes nothing, because there was nothing to fix.
+
+The real effect is on the other tier. E4 times both legs separately:
+
+| | spread across h | verdict |
+|---|---|---|
+| `beta_L2` (resident panel) | 5.5–7.5% | constant, premise holds |
+| `beta_DRAM` (streaming) | **27–34%**, 42 → 58 GB/s | **not constant** |
+
+`beta_DRAM` rises monotonically with `h`: as DRAM references thin out they
+overlap better and each one costs less — memory-level parallelism. Thm 4.2
+composes two tiers at *constant* per-tier bandwidth, so no single `r` can
+describe this system and E4's R² failure follows necessarily. **It is the
+premise that fails, not the harmonic form.**
+
+Note the harmonic law itself cannot be validated from this decomposition —
+given per-leg times, `1/beta_eff = h/beta_L2 + (1-h)/beta_DR` is an algebraic
+identity. The premise is the only part these measurements can independently
+test, and the harness says so rather than reporting a tautology as a result.
+
+Two consequences. On this platform the S(h) gate as written is untestable and
+needs the Sapphire Rapids target. And wherever the effect exists,
+counter-measured `h` alone cannot predict speedup — the value of a hit depends
+on how much miss traffic runs beside it.
 
 **E5 on real weights.** Qwen2.5-0.5B, WikiText-2, Linear weights only:
 

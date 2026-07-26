@@ -47,7 +47,7 @@ L, N_LAYERS, D_H = 8192, 32, 128
 B_EFF, B_KV = 4.5, 3.5
 
 
-def main(reps: int = 5) -> int:
+def main(reps: int = 11) -> int:
     exp = Experiment("E7", "End-to-end Amdahl", "Cor. 4.4")
     topo = K.l2_topology()
     exp.note(topo.provenance)

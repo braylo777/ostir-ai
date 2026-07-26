@@ -37,6 +37,14 @@ def find_knee(sizes: np.ndarray, bps: np.ndarray) -> tuple[float, float, float]:
     log(size). A midpoint crossing is far more stable than an argmax of the
     derivative, which chases noise on a curve this shallow.
     """
+    # Same monotone projection as the per-rep search: the knee is defined on
+    # a non-increasing curve, so a noise blip must not be able to define it.
+    mono, cur = [], float("inf")
+    for x in bps:
+        cur = min(cur, x)
+        mono.append(cur)
+    bps = np.array(mono)
+
     plateau = float(np.median(bps[: max(2, len(bps) // 5)]))
     floor = float(np.median(bps[-max(2, len(bps) // 5) :]))
     threshold = 0.5 * (plateau + floor)
@@ -50,7 +58,7 @@ def find_knee(sizes: np.ndarray, bps: np.ndarray) -> tuple[float, float, float]:
     return float("nan"), plateau, floor
 
 
-def main(steps: int = 24, reps: int = 3) -> int:
+def main(steps: int = 24, reps: int = 5) -> int:
     exp = Experiment("E2", "Residency knee", "Prop. 3.1 — the true eta")
     topo = K.l2_topology()
     # A single-threaded sweep gets the entire shared cache, so eta must be
@@ -81,6 +89,25 @@ def main(steps: int = 24, reps: int = 3) -> int:
     # threshold and the crossing together, which inflated the measured spread
     # from ~10% to 41%.
     threshold = 0.5 * (plateau + floor)
+
+    def monotone(v):
+        """Running minimum: enforce the non-increasing shape the knee is
+        defined on.
+
+        Bandwidth against working-set size is non-increasing by construction,
+        but measurement noise puts upward blips in it. A first-crossing
+        search over the raw curve then latches onto whichever blip happens to
+        sit near the threshold, and the located knee jumps by a factor of two
+        between repetitions -- 105% spread on a curve whose plateau/floor
+        ratio is only 1.8. Projecting onto the monotone shape first removes
+        that failure mode without smoothing away the knee itself.
+        """
+        out, cur = [], float("inf")
+        for x in v:
+            cur = min(cur, x)
+            out.append(cur)
+        return np.array(out)
+
     knees = []
     for rep_i in range(reps):
         sub = sorted((x for x in recs if x["rep"] == rep_i),
@@ -88,7 +115,7 @@ def main(steps: int = 24, reps: int = 3) -> int:
         if len(sub) < steps // 2:
             continue
         sz = np.array([x["bytes"] for x in sub], float)
-        bp = np.array([x["bps"] for x in sub], float)
+        bp = monotone(np.array([x["bps"] for x in sub], float))
         for i in range(1, len(bp)):
             if bp[i] <= threshold < bp[i - 1]:
                 x0, x1 = np.log(sz[i - 1]), np.log(sz[i])
