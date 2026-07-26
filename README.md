@@ -17,6 +17,19 @@ python3 run_all.py --model Qwen/Qwen2.5-0.5B   # full E5 accuracy pipeline
 
 The C kernel builds automatically on first use (`make -C kernels`).
 
+For E5 `--model`, install the pinned stack into a **native** interpreter:
+
+```bash
+/usr/bin/python3 -m venv .venv          # macOS: NOT a Rosetta Anaconda python
+.venv/bin/pip install -r requirements-e5.txt
+```
+
+On Apple Silicon check `python -c "import platform;print(platform.machine())"`
+returns `arm64`. A Rosetta x86_64 interpreter reports the wrong ISA and runs
+torch emulated. If HuggingFace downloads stall (they did here, repeatedly, at
+a few MB/s), pre-fetch once and then run with `HF_HUB_OFFLINE=1
+HF_DATASETS_OFFLINE=1`.
+
 ## Layout
 
 ```
@@ -104,6 +117,29 @@ the streaming operand — or extending the law to `beta_L2(h)`. This is testable
 on the Intel target and matters there too: it means measured `h` from counters
 is not sufficient to predict speedup, because the *cost* of a hit is itself a
 function of the miss traffic.
+
+**E5 on real weights.** Qwen2.5-0.5B, WikiText-2, Linear weights only:
+
+| config | bpw | PPL |
+|---|---|---|
+| fp16 baseline | 16 | 12.6495 |
+| flat b4 G64 — the deck's **Path B** | 4.500 | 15.0333 |
+| hier b4 G32 K8 — **Q4_K** | 4.500 | **14.4276** |
+| hier + 0.1% outliers | 4.532 | **14.3027** |
+| flat b3 G64 | 3.500 | 37.5493 |
+
+**Thm 2.8 confirmed end-to-end:** at an identical 4.500 bpw the hierarchical
+G=32 scheme beats flat G=64 by **0.61 PPL** on real weights. Outlier
+extraction adds 0.12 PPL for 0.032 bits/weight. b=3 is not viable at this
+scale (3x worse).
+
+The delta-PPL < 0.15 gate **fails at +1.65**, and two things bound how far
+that generalizes — neither of them the residency argument. Quantization error
+at fixed bits/weight falls sharply with model size, and a sub-1B model is far
+more sensitive than the 7B class the gate is written for. And Alg. 2/3 are
+round-to-nearest with no calibration set and no error compensation, which is
+exactly what GPTQ and AWQ exist to recover. **Re-run on a 7B with a
+calibrated quantizer before treating any of this as the operating point.**
 
 **Still open.** E4's main gate fails on this host (R^2 ~ 0.6–0.8), now with a
 measured mechanism rather than a hypothesis. E5's delta-PPL gate needs
