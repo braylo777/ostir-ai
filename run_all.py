@@ -44,6 +44,20 @@ def main() -> int:
         "--model", default=None, help="pass to E5 for the full " "accuracy pipeline"
     )
     ap.add_argument(
+        "--e5-limit",
+        type=int,
+        default=16,
+        help="E5 --model: eval examples per config (default 16)",
+    )
+    ap.add_argument(
+        "--e5-tasks",
+        default="",
+        help="E5 --model: extra tasks, e.g. mmlu,gsm8k. Empty by default -- "
+        "the monograph's E5 gate is delta-PPL on WikiText-2; MMLU and GSM8K "
+        "are large downloads and add hours.",
+    )
+    ap.add_argument("--e5-device", default="cpu", help="E5 --model: cpu|mps|cuda")
+    ap.add_argument(
         "--settle",
         type=float,
         default=20.0,
@@ -58,7 +72,20 @@ def main() -> int:
             continue
         cmd = [sys.executable, str(EXP / script)] + extra
         if eid == "E5" and args.model:
-            cmd += ["--model", args.model]
+            # Pass the limits explicitly. E5's own default is --limit 200,
+            # which across five configurations means 1000 WikiText windows
+            # plus 1000 MMLU scorings and 1000 GSM8K generations -- hours of
+            # work that silently stalls an otherwise minutes-long suite run.
+            cmd += [
+                "--model",
+                args.model,
+                "--limit",
+                str(args.e5_limit),
+                "--tasks",
+                args.e5_tasks,
+                "--device",
+                args.e5_device,
+            ]
 
         # Idle between experiments. Run back-to-back on a host without core
         # isolation, each experiment leaves the next one hotter and noisier:
