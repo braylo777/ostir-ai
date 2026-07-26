@@ -196,6 +196,25 @@ def test_solver_prefers_lower_traffic():
     assert best.distortion <= 0.02
 
 
+def test_solver_respects_the_reuse_floor():
+    """Every returned candidate must satisfy m_c*k_c >= n_min.
+
+    Regression: m_c was clamped to shape.M *after* the floor check, so a
+    k_c = 1 candidate passed the check at m_c ~ 2.5e6 and then clamped to
+    M = 4096, giving a 4096-weight panel. A degenerate panel trivially
+    minimizes modeled traffic, so the solver returned it as optimal.
+    """
+    shape = GemmShape(4096, 4096, 4096)
+    n_min = 1 << 16
+    best, all_c = solve_resident_config(
+        C_bytes=2 << 20, eta=0.60, D_max=0.02, shape=shape, n_min=n_min
+    )
+    assert best is not None
+    for c in all_c:
+        assert c.n_panel >= n_min, f"{c.b}/{c.G} k_c={c.k_c} n={c.n_panel}"
+        assert c.m_c <= shape.M
+
+
 def _run_all() -> int:
     fns = [
         (n, f)

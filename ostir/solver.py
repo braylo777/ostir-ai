@@ -79,11 +79,16 @@ def solve_resident_config(
                     continue
                 cap = n_max(rate, 1.0, int(c_prime))  # eta already applied
                 for k_c in divisors(shape.K):
-                    m_c = int(cap // k_c)
+                    # Clamp BEFORE validating. Clamping m_c to M after the
+                    # reuse-floor check lets the clamp silently violate it:
+                    # at k_c = 1 the residency-limited m_c is ~2.5e6, passes
+                    # the floor, then clamps to M = 4096 and yields a
+                    # 4096-weight panel -- which the solver was then free to
+                    # return as optimal, because a degenerate panel trivially
+                    # minimizes modeled traffic.
+                    m_c = min(int(cap // k_c), shape.M)
                     if m_c < 1 or m_c * k_c < n_min:
                         continue
-                    if m_c > shape.M:
-                        m_c = shape.M
                     traffic = modeled_traffic(shape, m_c, k_c, rate)
                     feasible.append(
                         Candidate(b, G, hier, m_c, k_c, rate, dist, traffic, p_outlier)
