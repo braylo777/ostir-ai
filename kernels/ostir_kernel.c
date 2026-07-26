@@ -253,41 +253,83 @@ uint64_t stream_sum(const uint64_t *restrict p, size_t words)
 /* Batched reduction: each loaded weight serves nb multiply-accumulates
  * against nb distinct activation values, into nb distinct accumulators.
  *
- * Every part of that shape is load-bearing. The first version did
- * `acc += w * (b + 1)` into ONE accumulator, which the compiler folds to
- * `acc += w * nb(nb+1)/2` -- the MACs never execute, so MAC rate scaled
- * perfectly linearly to 155 GMAC/s while no arithmetic happened, and the
- * single serial accumulator pinned reads at 20 GB/s against L2's 72. Both
- * the per-batch activations (opaque, read from memory) and the separate
- * accumulators are needed to keep the work real. The i-loop is unrolled by
- * 8 so that nb = 1 still has instruction-level parallelism and is limited by
- * bandwidth rather than by one dependent add chain. */
+ * Two things had to be fixed here before E6 measured anything real.
+ *
+ * 1. The first version did `acc += w * (b + 1)` into ONE accumulator, which
+ *    the compiler folds to `acc += w * nb(nb+1)/2` -- the MACs never execute.
+ *    MAC rate scaled perfectly linearly to 155 GMAC/s while no arithmetic
+ *    happened. Opaque per-batch activations read from memory fix that.
+ *
+ * 2. With nb a RUNTIME value the compiler cannot keep acc[] in registers, so
+ *    it spills to the stack and every MAC becomes a load-modify-store. That
+ *    capped the low-batch plateau at 19 GB/s against L2's 73 -- only 27% --
+ *    so the loop was never memory-bound and n_b* (the ratio of compute
+ *    saturation to the memory-bound byte rate) inherited the bias.
+ *    BATCH_CASE specializes nb at compile time so acc[] lives in registers.
+ *    Unspecialized nb falls back to the generic path and is reported as
+ *    such, so a biased point can never be silently quoted.
+ *
+ * The i-loop is unrolled by 8 with a tree reduction so that nb = 1 still has
+ * instruction-level parallelism and is limited by bandwidth rather than by
+ * one dependent add chain.
+ */
+#define BATCH_BODY(NB)                                                       \
+    do {                                                                     \
+        uint64_t acc[NB];                                                    \
+        for (int b = 0; b < (NB); b++) acc[b] = 0;                           \
+        const size_t bulk = words & ~(size_t)7;                              \
+        size_t i = 0;                                                        \
+        for (; i < bulk; i += 8) {                                           \
+            for (int b = 0; b < (NB); b++) {                                 \
+                const uint64_t a = act[b];                                   \
+                uint64_t t0 = p[i] * a + p[i + 1] * a;                       \
+                uint64_t t1 = p[i + 2] * a + p[i + 3] * a;                   \
+                uint64_t t2 = p[i + 4] * a + p[i + 5] * a;                   \
+                uint64_t t3 = p[i + 6] * a + p[i + 7] * a;                   \
+                acc[b] += (t0 + t1) + (t2 + t3);                             \
+            }                                                                \
+        }                                                                    \
+        for (; i < words; i++)                                               \
+            for (int b = 0; b < (NB); b++) acc[b] += p[i] * act[b];          \
+        uint64_t s = 0;                                                      \
+        for (int b = 0; b < (NB); b++) s += acc[b];                          \
+        return s;                                                            \
+    } while (0)
+
+#define BATCH_CASE(NB) case NB: BATCH_BODY(NB)
+
+/* Which nb values get a register-resident specialization. E6 sweeps exactly
+ * these so every reported point is unbiased. */
+#define BATCH_SPECIALIZED_LIST "1,2,3,4,6,8,12,16,20,24,32,40,48,64"
+
 static uint64_t batch_kernel(const uint64_t *restrict p, size_t words,
                              const uint64_t *restrict act, int nb)
 {
-    uint64_t acc[MAX_BATCH] = {0};
-    const size_t bulk = words & ~(size_t)7;
-    size_t i = 0;
-    for (; i < bulk; i += 8) {
-        for (int b = 0; b < nb; b++) {
-            const uint64_t a = act[b];
-            /* Eight multiplies, but the adds form a tree rather than a chain.
-             * Eight sequential `acc[b] +=` is a serial dependency that caps
-             * the loop at one add/cycle and held nb=1 at 20 GB/s against
-             * L2's 72 -- which drags the measured knee down with it. The
-             * tree leaves exactly one dependent add per 8 elements. */
-            uint64_t t0 = p[i] * a + p[i + 1] * a;
-            uint64_t t1 = p[i + 2] * a + p[i + 3] * a;
-            uint64_t t2 = p[i + 4] * a + p[i + 5] * a;
-            uint64_t t3 = p[i + 6] * a + p[i + 7] * a;
-            acc[b] += (t0 + t1) + (t2 + t3);
-        }
+    switch (nb) {
+    BATCH_CASE(1);  BATCH_CASE(2);  BATCH_CASE(3);  BATCH_CASE(4);
+    BATCH_CASE(6);  BATCH_CASE(8);  BATCH_CASE(12); BATCH_CASE(16);
+    BATCH_CASE(20); BATCH_CASE(24); BATCH_CASE(32); BATCH_CASE(40);
+    BATCH_CASE(48); BATCH_CASE(64);
+    default: break;
     }
-    for (; i < words; i++)
-        for (int b = 0; b < nb; b++) acc[b] += p[i] * act[b];
-    uint64_t s = 0;
-    for (int b = 0; b < nb; b++) s += acc[b];
-    return s;
+    /* Generic fallback: acc[] spills, so this point is BIASED. Callers must
+     * mark it -- see "specialized" in the JSON record. */
+    {
+        uint64_t acc[MAX_BATCH] = {0};
+        for (size_t i = 0; i < words; i++)
+            for (int b = 0; b < nb; b++) acc[b] += p[i] * act[b];
+        uint64_t s = 0;
+        for (int b = 0; b < nb; b++) s += acc[b];
+        return s;
+    }
+}
+
+static int batch_is_specialized(int nb)
+{
+    static const int ok[] = {1, 2, 3, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64};
+    for (size_t i = 0; i < sizeof(ok) / sizeof(ok[0]); i++)
+        if (ok[i] == nb) return 1;
+    return 0;
 }
 
 /* Mixed-residency reduction: dispatch CHUNK-sized reads to the resident panel
@@ -535,7 +577,11 @@ static void cmd_batch(size_t panel_bytes, int max_batch, int reps)
     for (int b = 0; b < MAX_BATCH; b++)
         act[b] = (panel[b % words] | 1ULL) + (uint64_t)b;
 
-    for (int nb = 1; nb <= max_batch && nb <= MAX_BATCH; nb = (nb < 4) ? nb + 1 : (nb * 3) / 2) {
+    static const int NB_LIST[] = {1, 2, 3, 4, 6, 8, 12, 16, 20, 24,
+                                  32, 40, 48, 64};
+    for (size_t nbi = 0; nbi < sizeof(NB_LIST) / sizeof(NB_LIST[0]); nbi++) {
+        int nb = NB_LIST[nbi];
+        if (nb > max_batch) break;
         for (int rep = 0; rep < reps; rep++) {
             size_t passes = 1;
             uint64_t t0, t1;
@@ -563,9 +609,10 @@ static void cmd_batch(size_t panel_bytes, int max_batch, int reps)
             double macs = (double)passes * words * nb;
             printf("{\"kind\": \"batch\", \"rep\": %d, \"n_batch\": %d, "
                    "\"bytes\": %.0f, \"macs\": %.0f, \"ns\": %llu, "
-                   "\"bps\": %.6e, \"macs_per_s\": %.6e",
+                   "\"bps\": %.6e, \"macs_per_s\": %.6e, \"specialized\": %s",
                    rep, nb, bytes, macs, (unsigned long long)(c1 - c0),
-                   bytes / secs, macs / secs);
+                   bytes / secs, macs / secs,
+                   batch_is_specialized(nb) ? "true" : "false");
             counters_json();
             printf(", \"checksum\": %llu}\n", (unsigned long long)sink);
             fflush(stdout);
