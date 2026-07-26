@@ -38,7 +38,14 @@
 #include <sys/mman.h>
 #endif
 
-#define CHUNK        4096ULL           /* dispatch granularity for mixed-h   */
+/* Dispatch granularity for mixed-h. 4 KiB throttled the DRAM leg to 17 GB/s
+ * against 42 GB/s for the same bytes read contiguously -- the prefetcher gets
+ * no run-up when the stream restarts every page. 64 KiB recovers most of it
+ * and still gives ~32k dispatch decisions per 2 GiB region, far finer than
+ * the h resolution needs. */
+#ifndef CHUNK
+#define CHUNK        65536ULL
+#endif
 #define CACHELINE    64ULL
 #define MIN_RUN_NS   80000000ULL       /* >=80 ms per timed region           */
 
@@ -241,10 +248,57 @@ uint64_t stream_sum(const uint64_t *restrict p, size_t words)
     return (a0 + a1) + (a2 + a3) + (a4 + a5) + (a6 + a7);
 }
 
+#define MAX_BATCH 64
+
+/* Batched reduction: each loaded weight serves nb multiply-accumulates
+ * against nb distinct activation values, into nb distinct accumulators.
+ *
+ * Every part of that shape is load-bearing. The first version did
+ * `acc += w * (b + 1)` into ONE accumulator, which the compiler folds to
+ * `acc += w * nb(nb+1)/2` -- the MACs never execute, so MAC rate scaled
+ * perfectly linearly to 155 GMAC/s while no arithmetic happened, and the
+ * single serial accumulator pinned reads at 20 GB/s against L2's 72. Both
+ * the per-batch activations (opaque, read from memory) and the separate
+ * accumulators are needed to keep the work real. The i-loop is unrolled by
+ * 8 so that nb = 1 still has instruction-level parallelism and is limited by
+ * bandwidth rather than by one dependent add chain. */
+static uint64_t batch_kernel(const uint64_t *restrict p, size_t words,
+                             const uint64_t *restrict act, int nb)
+{
+    uint64_t acc[MAX_BATCH] = {0};
+    const size_t bulk = words & ~(size_t)7;
+    size_t i = 0;
+    for (; i < bulk; i += 8) {
+        for (int b = 0; b < nb; b++) {
+            const uint64_t a = act[b];
+            /* Eight multiplies, but the adds form a tree rather than a chain.
+             * Eight sequential `acc[b] +=` is a serial dependency that caps
+             * the loop at one add/cycle and held nb=1 at 20 GB/s against
+             * L2's 72 -- which drags the measured knee down with it. The
+             * tree leaves exactly one dependent add per 8 elements. */
+            uint64_t t0 = p[i] * a + p[i + 1] * a;
+            uint64_t t1 = p[i + 2] * a + p[i + 3] * a;
+            uint64_t t2 = p[i + 4] * a + p[i + 5] * a;
+            uint64_t t3 = p[i + 6] * a + p[i + 7] * a;
+            acc[b] += (t0 + t1) + (t2 + t3);
+        }
+    }
+    for (; i < words; i++)
+        for (int b = 0; b < nb; b++) acc[b] += p[i] * act[b];
+    uint64_t s = 0;
+    for (int b = 0; b < nb; b++) s += acc[b];
+    return s;
+}
+
 /* Mixed-residency reduction: dispatch CHUNK-sized reads to the resident panel
  * or the DRAM buffer so that exactly `h` of bytes come from the panel.
  * Bresenham keeps the interleave even, which matters -- a blocked interleave
- * lets the DRAM prefetcher run ahead and inflates apparent bandwidth. */
+ * lets the DRAM prefetcher run ahead and inflates apparent bandwidth.
+ *
+ * No BARRIER inside this loop. Each chunk reads a different address, so there
+ * is nothing for the compiler to hoist, and a "memory" clobber every 4 KiB
+ * throttled the DRAM leg from 42 to 14 GB/s. The single barrier the caller
+ * applies per region is sufficient. */
 static uint64_t mixed_sum(const uint64_t *restrict panel, size_t panel_words,
                           const uint64_t *restrict dram, size_t dram_words,
                           double h, size_t total_chunks, uint64_t *dram_cursor)
@@ -260,12 +314,10 @@ static uint64_t mixed_sum(const uint64_t *restrict panel, size_t panel_words,
             err -= 1.0;
             if (pcur + cw > panel_words) pcur = 0;
             acc += stream_sum(panel + pcur, cw);
-            BARRIER(acc);
             pcur += cw;
         } else {
             if (dcur + cw > dram_words) dcur = 0;
             acc += stream_sum(dram + dcur, cw);
-            BARRIER(acc);
             dcur += cw;
         }
     }
@@ -405,19 +457,35 @@ static void cmd_panel_sweep(size_t min_bytes, size_t max_bytes, int steps,
 
 /* ---------------------------------------------------------------- E4    */
 
+/* Run the mixed-residency measurement at an explicit list of h values.
+ * E7 needs specific h values (the weight-traffic share f of a given
+ * attention configuration), not a uniform grid. */
+static void cmd_mixed_h_at(size_t panel_bytes, size_t dram_bytes,
+                           double h_value, int reps);
+
 static void cmd_mixed_h(size_t panel_bytes, size_t dram_bytes,
                         int n_points, int reps)
 {
     uint64_t *panel = alloc_aligned(panel_bytes);
     uint64_t *dram  = alloc_aligned(dram_bytes);
     if (!panel || !dram) { fprintf(stderr, "alloc failed\n"); exit(1); }
-    size_t pw = panel_bytes / sizeof(uint64_t);
-    size_t dw = dram_bytes / sizeof(uint64_t);
+    size_t pw = (panel_bytes / sizeof(uint64_t)) & ~(size_t)7;
+    size_t dw = (dram_bytes / sizeof(uint64_t)) & ~(size_t)7;
     uint64_t sink = 0;
     counters_init();
 
-    /* Enough chunks that each timed region clears MIN_RUN_NS comfortably. */
-    const size_t chunks = (64ULL << 20) / CHUNK;
+    /* 2 GiB of dispatched reads per timed region. The first cut used 64 MiB,
+     * which took ~1.5 ms at DRAM speed -- far too short to time, and small
+     * enough that the "DRAM" leg was really being served from the last-level
+     * cache. That made the h=0 baseline read 61 GB/s instead of 42, which
+     * compressed the whole S(h) curve and produced a spurious E4 failure with
+     * R^2 = -5.6. The DRAM leg must sweep far more than any cache. */
+    const size_t chunks = (2ULL << 30) / CHUNK;
+
+    /* Cursor persists across warm-up, reps and h points, so successive DRAM
+     * chunks keep marching through the whole buffer instead of re-reading a
+     * warm window from offset zero. */
+    uint64_t cur = 0;
 
     for (int i = 0; i < n_points; i++) {
         /* Span [0, 1] inclusive; the monograph asks for >=20 points over
@@ -425,10 +493,8 @@ static void cmd_mixed_h(size_t panel_bytes, size_t dram_bytes,
         double h = (n_points == 1) ? 1.0 : (double)i / (n_points - 1);
 
         for (int rep = 0; rep < reps; rep++) {
-            uint64_t cur = 0;
             sink += mixed_sum(panel, pw, dram, dw, h, chunks / 8, &cur); /* warm */
 
-            cur = 0;
             counters_start();
             uint64_t t0 = now_ns();
             sink += mixed_sum(panel, pw, dram, dw, h, chunks, &cur);
@@ -463,20 +529,20 @@ static void cmd_batch(size_t panel_bytes, int max_batch, int reps)
     uint64_t sink = 0;
     counters_init();
 
-    for (int nb = 1; nb <= max_batch; nb = (nb < 4) ? nb + 1 : (nb * 3) / 2) {
+    /* Activations taken from the buffer itself: runtime data the compiler
+     * cannot constant-fold through. */
+    uint64_t act[MAX_BATCH];
+    for (int b = 0; b < MAX_BATCH; b++)
+        act[b] = (panel[b % words] | 1ULL) + (uint64_t)b;
+
+    for (int nb = 1; nb <= max_batch && nb <= MAX_BATCH; nb = (nb < 4) ? nb + 1 : (nb * 3) / 2) {
         for (int rep = 0; rep < reps; rep++) {
             size_t passes = 1;
             uint64_t t0, t1;
             do {
                 t0 = now_ns();
                 for (size_t p = 0; p < passes; p++) {
-                    uint64_t acc = 0;
-                    for (size_t i = 0; i < words; i++) {
-                        uint64_t w = panel[i];          /* one load ...      */
-                        for (int b = 0; b < nb; b++)    /* ... nb MACs on it */
-                            acc += w * (uint64_t)(b + 1);
-                    }
-                    sink += acc;
+                    sink += batch_kernel(panel, words, act, nb);
                     BARRIER(sink);
                 }
                 t1 = now_ns();
@@ -486,12 +552,7 @@ static void cmd_batch(size_t panel_bytes, int max_batch, int reps)
             counters_start();
             uint64_t c0 = now_ns();
             for (size_t p = 0; p < passes; p++) {
-                uint64_t acc = 0;
-                for (size_t i = 0; i < words; i++) {
-                    uint64_t w = panel[i];
-                    for (int b = 0; b < nb; b++) acc += w * (uint64_t)(b + 1);
-                }
-                sink += acc;
+                sink += batch_kernel(panel, words, act, nb);
                 BARRIER(sink);
             }
             uint64_t c1 = now_ns();
@@ -511,6 +572,40 @@ static void cmd_batch(size_t panel_bytes, int max_batch, int reps)
         }
     }
     free(panel);
+}
+
+/* --------------------------------------------------------- E7 helper    */
+
+static void cmd_mixed_h_at(size_t panel_bytes, size_t dram_bytes,
+                           double h_value, int reps)
+{
+    uint64_t *panel = alloc_aligned(panel_bytes);
+    uint64_t *dram  = alloc_aligned(dram_bytes);
+    if (!panel || !dram) { fprintf(stderr, "alloc failed\n"); exit(1); }
+    size_t pw = (panel_bytes / sizeof(uint64_t)) & ~(size_t)7;
+    size_t dw = (dram_bytes / sizeof(uint64_t)) & ~(size_t)7;
+    uint64_t sink = 0, cur = 0;
+    counters_init();
+    const size_t chunks = (2ULL << 30) / CHUNK;
+
+    for (int rep = 0; rep < reps; rep++) {
+        sink += mixed_sum(panel, pw, dram, dw, h_value, chunks / 8, &cur);
+        counters_start();
+        uint64_t t0 = now_ns();
+        sink += mixed_sum(panel, pw, dram, dw, h_value, chunks, &cur);
+        uint64_t t1 = now_ns();
+        counters_stop();
+        double bytes = (double)chunks * CHUNK;
+        printf("{\"kind\": \"mixed\", \"rep\": %d, \"h_designed\": %.6f, "
+               "\"panel_bytes\": %zu, \"bytes\": %.0f, \"ns\": %llu, "
+               "\"bps\": %.6e",
+               rep, h_value, panel_bytes, bytes,
+               (unsigned long long)(t1 - t0), bytes / ((t1 - t0) / 1e9));
+        counters_json();
+        printf(", \"checksum\": %llu}\n", (unsigned long long)sink);
+        fflush(stdout);
+    }
+    free(panel); free(dram);
 }
 
 /* ------------------------------------------------- selftest (diagnostic) */
@@ -562,6 +657,7 @@ static void usage(void)
         "  bandwidth   [l2_probe=128k] [dram=1G] [reps=5]\n"
         "  panel-sweep [min=64k] [max=64M] [steps=32] [reps=3]\n"
         "  mixed-h     [panel=128k] [dram=1G] [points=21] [reps=5]\n"
+        "  mixed-h-at  [panel=128k] [dram=1G] [h=1.0] [reps=5]\n"
         "  batch       [panel=128k] [max_batch=64] [reps=3]\n");
 }
 
@@ -589,6 +685,10 @@ int main(int argc, char **argv)
     else if (!strcmp(cmd, "batch"))
         cmd_batch(a2 ? arg_bytes(a2) : 128 << 10,
                   a3 ? atoi(a3) : 64, a4 ? atoi(a4) : 3);
+    else if (!strcmp(cmd, "mixed-h-at"))
+        cmd_mixed_h_at(a2 ? arg_bytes(a2) : 128 << 10,
+                       a3 ? arg_bytes(a3) : 1ULL << 30,
+                       a4 ? atof(a4) : 1.0, a5 ? atoi(a5) : 5);
     else if (!strcmp(cmd, "selftest"))
         cmd_selftest(a2 ? arg_bytes(a2) : 64 << 10);
     else { usage(); return 2; }
