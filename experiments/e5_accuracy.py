@@ -403,12 +403,25 @@ def real_model(
 
 
 def quantize_model_(model, cfg: dict) -> dict:
-    """Quantize every 2-D weight in place; return the achieved bit rate."""
+    """Quantize the Linear (GEMM) weights in place; return the achieved rate.
+
+    nn.Linear only -- NOT every 2-D tensor. The embedding matrix is 2-D but is
+    a gather, not a GEMM, so it is not part of the resident weight panel the
+    monograph reasons about. It is also tied to lm_head in many small models
+    (Qwen2.5-0.5B included), where it is both the largest single tensor and
+    the most quantization-sensitive: including it charges the operating point
+    for accuracy loss the residency argument never claimed to cause, and would
+    make delta-PPL fail for the wrong reason. Standard PTQ practice keeps
+    embeddings and the LM head in higher precision for the same reason.
+    """
     import torch
+    import torch.nn as nn
 
     total_bits = 0
     total_w = 0
     for _, mod in model.named_modules():
+        if not isinstance(mod, nn.Linear):
+            continue
         W = getattr(mod, "weight", None)
         if W is None or W.dim() != 2:
             continue
