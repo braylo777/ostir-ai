@@ -88,14 +88,28 @@ hierarchical advantage measured +1.16 dB against a predicted +1.00. Prop
    min–max's 5.0 — and in that form it is decisive. §2.6 should assert the
    rate-aware version.
 
-**Not yet answered.** E4's gate fails on this host (R^2 ~ 0.6–0.8) with
-residuals showing systematic curvature, attributable to the M2 Pro's
-three-tier hierarchy rather than to Part IV; the monograph's two-tier model
-needs a three-tier extension before that verdict means anything. E6's knee is
-measured but flagged biased — its plateau reaches only 27% of `beta_L2`, so it
-needs a real AMX inner kernel. E5's delta-PPL gate needs `--model`. And `r` is
-0.57 here against the monograph's 0.085, so no magnitude in Parts III–IV is
-reproducible on this class of hardware.
+**A fourth finding: Thm 4.2's premise is measurably false, and §3.2 already
+says why.** E4 times the panel leg and the DRAM leg separately, so per-tier
+bandwidth is measured rather than assumed. The panel leg runs at **63.6 GB/s
+when interleaved against 73.0 GB/s at h=1 — 13% slower**. The resident panel
+is slower *because* a DRAM stream is running alongside it: the streaming
+operand flows through L2 and evicts panel lines. That is exactly §3.2's
+streaming-pollution term, the same one that forces `eta` below 1.
+
+Thm 4.2 composes two tiers at *constant* per-tier bandwidth, so no value of
+`r` can absorb this and systematic residual structure follows necessarily.
+**The composition law is not what fails; its premise is.** The fix is the one
+§3.2 already prescribes — non-temporal loads or explicit prefetch hints for
+the streaming operand — or extending the law to `beta_L2(h)`. This is testable
+on the Intel target and matters there too: it means measured `h` from counters
+is not sufficient to predict speedup, because the *cost* of a hit is itself a
+function of the miss traffic.
+
+**Still open.** E4's main gate fails on this host (R^2 ~ 0.6–0.8), now with a
+measured mechanism rather than a hypothesis. E5's delta-PPL gate needs
+`--model`. And `r` is 0.57–0.66 here against the monograph's 0.085, so no
+magnitude in Parts III–IV is reproducible on this class of hardware — only
+functional forms and premises.
 
 ## Four bugs the kernel had before it could measure anything
 
@@ -111,6 +125,12 @@ are documented at their sites because they are easy to reintroduce.
   and it flattened the curve to 27 GB/s from 32 KiB to 256 MiB. **A machine
   with no cache hierarchy at all** — which reads as "residency does nothing"
   rather than as a broken benchmark.
+- E6's batch loop folded `sum_b w*(b+1)` into `w*nb(nb+1)/2`, so the MACs
+  never ran while MAC rate scaled linearly to 155 GMAC/s; and with `nb` a
+  runtime value the accumulators spilled to the stack, capping the plateau at
+  27% of `beta_L2`. `n_b*` is the ratio of those two quantities, so it
+  inherited both. Compile-time specialization (`BATCH_CASE`) puts the
+  accumulators back in registers — `nb=1` now measures 100% of `beta_L2`.
 
 The last one is the cautionary case: it would have refuted the thesis on the
 strength of a compiler heuristic.

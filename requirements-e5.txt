@@ -1,0 +1,9 @@
+# Pinned for Python 3.9 / macOS arm64. Unpinned resolution backtracks through
+# many torch wheels (~1 GB downloaded, no convergence) because few recent
+# torch releases still ship cp39 wheels.
+numpy==1.26.4
+scipy==1.13.1
+torch==2.2.2
+transformers==4.44.2
+datasets==2.21.0
+accelerate==0.33.0

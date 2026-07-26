@@ -341,6 +341,59 @@ static int batch_is_specialized(int nb)
  * is nothing for the compiler to hoist, and a "memory" clobber every 4 KiB
  * throttled the DRAM leg from 42 to 14 GB/s. The single barrier the caller
  * applies per region is sufficient. */
+/* Per-leg timing. Thm 4.2 assumes each tier delivers a FIXED bandwidth
+ * independent of the mix. That is an assumption, not a measurement, and it is
+ * exactly what fails when S(h) shows curvature: if effective DRAM bandwidth
+ * rises as DRAM references thin out (memory-level parallelism), or if part of
+ * the "DRAM" stream is really being served by an intermediate cache, then the
+ * per-tier bandwidths are functions of h and the harmonic law cannot hold with
+ * constants.
+ *
+ * So measure them. Accumulate panel-leg and DRAM-leg time separately within
+ * the same run. Two clock_gettime calls per 64 KiB chunk costs ~1-3% of the
+ * region and turns the explanation for E4's curvature from a hypothesis into
+ * a number. */
+typedef struct {
+    uint64_t acc;
+    uint64_t ns_panel, ns_dram;
+    uint64_t bytes_panel, bytes_dram;
+} mixed_stats_t;
+
+static mixed_stats_t mixed_sum_split(const uint64_t *restrict panel,
+                                     size_t panel_words,
+                                     const uint64_t *restrict dram,
+                                     size_t dram_words,
+                                     double h, size_t total_chunks,
+                                     uint64_t *dram_cursor)
+{
+    const size_t cw = CHUNK / sizeof(uint64_t);
+    mixed_stats_t st = {0, 0, 0, 0, 0};
+    double err = 0.0;
+    size_t pcur = 0, dcur = *dram_cursor;
+
+    for (size_t k = 0; k < total_chunks; k++) {
+        err += h;
+        if (err >= 1.0) {
+            err -= 1.0;
+            if (pcur + cw > panel_words) pcur = 0;
+            uint64_t t0 = now_ns();
+            st.acc += stream_sum(panel + pcur, cw);
+            st.ns_panel += now_ns() - t0;
+            st.bytes_panel += CHUNK;
+            pcur += cw;
+        } else {
+            if (dcur + cw > dram_words) dcur = 0;
+            uint64_t t0 = now_ns();
+            st.acc += stream_sum(dram + dcur, cw);
+            st.ns_dram += now_ns() - t0;
+            st.bytes_dram += CHUNK;
+            dcur += cw;
+        }
+    }
+    *dram_cursor = dcur;
+    return st;
+}
+
 static uint64_t mixed_sum(const uint64_t *restrict panel, size_t panel_words,
                           const uint64_t *restrict dram, size_t dram_words,
                           double h, size_t total_chunks, uint64_t *dram_cursor)
@@ -539,17 +592,24 @@ static void cmd_mixed_h(size_t panel_bytes, size_t dram_bytes,
 
             counters_start();
             uint64_t t0 = now_ns();
-            sink += mixed_sum(panel, pw, dram, dw, h, chunks, &cur);
+            mixed_stats_t st = mixed_sum_split(panel, pw, dram, dw, h,
+                                               chunks, &cur);
             uint64_t t1 = now_ns();
             counters_stop();
+            sink += st.acc;
 
             double bytes = (double)chunks * CHUNK;
             double bps = bytes / ((t1 - t0) / 1e9);
+            double bps_panel = st.ns_panel
+                ? (double)st.bytes_panel / (st.ns_panel / 1e9) : 0.0;
+            double bps_dram = st.ns_dram
+                ? (double)st.bytes_dram / (st.ns_dram / 1e9) : 0.0;
             printf("{\"kind\": \"mixed\", \"rep\": %d, \"h_designed\": %.6f, "
                    "\"panel_bytes\": %zu, \"bytes\": %.0f, \"ns\": %llu, "
-                   "\"bps\": %.6e",
+                   "\"bps\": %.6e, \"bps_panel_leg\": %.6e, "
+                   "\"bps_dram_leg\": %.6e",
                    rep, h, panel_bytes, bytes,
-                   (unsigned long long)(t1 - t0), bps);
+                   (unsigned long long)(t1 - t0), bps, bps_panel, bps_dram);
             counters_json();
             printf(", \"checksum\": %llu}\n", (unsigned long long)sink);
             fflush(stdout);

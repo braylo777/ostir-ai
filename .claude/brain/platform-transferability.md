@@ -33,4 +33,14 @@ Memory-level parallelism (effective DRAM bandwidth rising as DRAM references
 thin out) produces the same signature. `fit.diagnose()` names this case
 explicitly so it is not misread as refuting Part IV.
 
+**The premise, measured.** E4 now times each leg separately, so the
+fixed-per-tier-bandwidth assumption is tested rather than assumed. Result: the
+panel leg runs 13% slower when interleaved with a DRAM stream (63.6 vs 73.0
+GB/s). This is §3.2's streaming pollution -- the streaming operand flows
+through L2 and evicts panel lines. No constant `r` can absorb a tier whose
+bandwidth depends on the mix, so residual structure is guaranteed. The
+composition law is fine; its premise is not. This also matters on Intel:
+counter-measured `h` alone cannot predict speedup, because the cost of a hit
+depends on the miss traffic running beside it.
+
 Related: [[monograph-errata]], [[measure-what-you-think-you-measure]].

@@ -177,6 +177,59 @@ def main(points: int = 21, reps: int = 5) -> int:
             "counter methodology of §6.2 is NOT."
         )
 
+    # ---- Direct test of Thm 4.2's ASSUMPTION, not just its consequence ---
+    #
+    # The residency law composes two tiers harmonically at FIXED per-tier
+    # bandwidth. That premise is testable on its own: the kernel times the
+    # panel leg and the DRAM leg separately within each run, so beta_L2(h)
+    # and beta_DR(h) are measured directly. If either varies with the mix,
+    # no constant r can make the law fit, and residual structure follows
+    # without the composition itself being wrong.
+    leg_rows = []
+    pan = K.median_by([x for x in recs if x.get("bps_panel_leg", 0) > 0],
+                      "h_designed", "bps_panel_leg")
+    dra = K.median_by([x for x in recs if x.get("bps_dram_leg", 0) > 0],
+                      "h_designed", "bps_dram_leg")
+    for hv in sorted(set(pan) | set(dra)):
+        leg_rows.append({
+            "h": hv,
+            "beta_L2_leg_GBs": pan.get(hv, float("nan")) / 1e9,
+            "beta_DRAM_leg_GBs": dra.get(hv, float("nan")) / 1e9,
+        })
+    exp.data["per_leg_bandwidth"] = leg_rows
+    print("\nPer-leg bandwidth (tests the fixed-bandwidth premise directly):")
+    print(table(leg_rows, ["h", "beta_L2_leg_GBs", "beta_DRAM_leg_GBs"],
+                {"h": ".3f", "beta_L2_leg_GBs": ".2f",
+                 "beta_DRAM_leg_GBs": ".2f"}))
+
+    pv = [v for k, v in sorted(pan.items()) if k > 0]
+    if len(pv) >= 2:
+        spread = (max(pv) - min(pv)) / max(pv)
+        exp.data["beta_l2_leg_spread"] = spread
+        constant = spread <= 0.10
+        exp.check(
+            "Thm 4.2 premise: beta_L2 constant across the mix (within 10%)",
+            constant,
+            f"panel leg varies {min(pv) / 1e9:.1f}-{max(pv) / 1e9:.1f} GB/s "
+            f"({spread:.1%}) as h changes",
+        )
+        if not constant:
+            exp.note(
+                f"MEASURED VIOLATION of Thm 4.2's premise. The panel leg runs "
+                f"at {min(pv) / 1e9:.1f} GB/s at low h against "
+                f"{max(pv) / 1e9:.1f} GB/s at h=1 ({spread:.0%} lower) -- the "
+                f"resident panel is SLOWER when a DRAM stream is interleaved "
+                f"with it. That is §3.2's streaming pollution: the streaming "
+                f"operand flows through L2 and evicts panel lines, so the "
+                f"'resident' tier does not deliver a fixed bandwidth. "
+                f"Thm 4.2 composes two tiers at constant per-tier bandwidth, "
+                f"so no value of r can absorb this and systematic residual "
+                f"structure follows necessarily. The composition law is not "
+                f"what fails here; its premise is. Fixing it means either "
+                f"non-temporal loads / explicit prefetch hints for the "
+                f"streaming operand (§3.2 already prescribes exactly this to "
+                f"protect eta), or extending the law to beta_L2(h).")
+
     # The engineering consequence, in the monograph's own terms.
     ceiling = 1.0 / fit.r_used
     h10 = hit_rate_for_speedup(min(10.0, ceiling * 0.999), fit.r_used)
