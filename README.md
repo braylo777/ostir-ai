@@ -259,12 +259,27 @@ not a GEMM, and is tied to `lm_head` in this model):
 G=32 beats flat G=64 by **0.61 PPL** on real weights. Outlier extraction adds
 a further 0.12 PPL for 0.032 bits/weight. b=3 is not viable at this scale.
 
-The Δ-PPL < 0.15 gate **fails at +1.65**, bounded by two things that are not
-the residency argument: a sub-1B model is far more quantization-sensitive than
-the 7B class the gate targets, and Alg 2/3 are round-to-nearest with no
-calibration — precisely what GPTQ and AWQ exist to recover. Re-run on a 7B
-with a calibrated quantizer before treating anything here as the operating
-point.
+### Model-scale scaling of Δ-PPL
+
+The Δ-PPL gate **fails at +1.65** on the 0.5B model. To test whether that is
+the residency argument failing or simply model scale, the same five configs
+were run on Qwen2.5-1.5B:
+
+| config | 0.5B PPL | 1.5B PPL |
+|---|---|---|
+| fp16 baseline | 12.6495 | 8.8273 |
+| flat b4 G64 (Path B) | 15.0333 | 9.9427 |
+| hier b4 G32 K8 (Q4_K) | 14.4276 | **9.7025** |
+| **Δ-PPL at the best 4.5 bpw config** | **+1.65** | **+0.875** |
+
+**Δ-PPL roughly halves for 3× the parameters**, and Thm 2.8 reproduces on a
+second, independent model (hierarchical beats flat by 0.240 PPL at an
+identical 4.500 bpw). Both support the reading that the 0.15 gate is written
+for the 7B class rather than being a statement about the scheme. Extrapolating
+the trend puts a 7B model in the +0.3–0.4 range with plain round-to-nearest —
+still above the gate, and the remaining distance is what a calibrated
+quantizer (GPTQ/AWQ) exists to close. Neither has been run here, so the
+operating point remains unestablished.
 
 ---
 
