@@ -57,8 +57,10 @@ PMU, machine quiet.
 | **E5** Accuracy frontier | **FAIL** 10/11 | Δ-PPL gate; all 10 theory checks pass |
 | **E6** Batch threshold | **PASS** 3/3 | plateau reaches 100% of `beta_L2` |
 | **E7** End-to-end Amdahl | **PASS** 2/2 | composition within 20% |
+| **q4 GEMV** | *not a gate* | **0.79× vs fp16 here**; crossover at 16.3 GB/s |
 
-Plus 24/24 closed-form invariants.
+Plus 24/24 closed-form invariants. Five of six gates pass; E4 fails with a
+measured cause, and E5 fails a gate written for a larger model class.
 
 > **Read `docs/PLATFORM.md` before quoting any number from this host.**
 > `r = 0.61` here against the monograph's 0.085, so the residency ceiling is
@@ -309,10 +311,17 @@ strength of a compiler heuristic.
 
 ## Roadmap
 
+**The single highest-value next step is to run `kernels/q4_gemv.c` on a
+Sapphire Rapids host.** One command tests the 1.92× projection and decides
+whether the thesis is a business. Everything else is downstream of having the
+right machine; measuring Apple Silicon more precisely is measuring the wrong
+hardware.
+
 | Priority | Work | Unblocks |
 |---|---|---|
-| 1 | 4-bit GEMV with on-the-fly dequant; tokens/sec vs fp16 | the only real speedup claim |
-| 2 | Run on Sapphire Rapids / Xeon 6 with `isolcpus` | E4, E6, and every Part III–IV magnitude |
-| 3 | Verify the §6.2 event encodings against `perf list` | every counter-derived number |
-| 4 | E5 on a 7B model with a calibrated quantizer (GPTQ/AWQ) | the Δ-PPL operating point |
-| 5 | AMX inner kernel | `n_b*` comparable to the monograph's 18 |
+| **1** | `q4_gemv` + E1–E7 on Sapphire Rapids / Xeon 6 with `isolcpus` | the 1.92× projection, E4, E6, every Part III–IV magnitude |
+| 2 | Verify the §6.2 event encodings against `perf list` | every counter-derived number, and `h_measured` at all |
+| 3 | E5 on a 7B model with a calibrated quantizer (GPTQ/AWQ) | the Δ-PPL operating point |
+| 4 | AMX inner kernel for the q4 unpack and the batch sweep | `pi_q4` on the real target; `n_b*` comparable to 18 |
+| 5 | Full decode loop (attention + KV) around the q4 GEMV | an end-to-end tokens/sec number |
+| ~~—~~ | ~~4-bit GEMV with on-the-fly dequant~~ | **done** — `kernels/q4_gemv.c` |
