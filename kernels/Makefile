@@ -22,3 +22,11 @@ bin:
 
 clean:
 	rm -rf bin
+
+Q4BIN := bin/q4_gemv
+
+.PHONY: q4
+q4: $(Q4BIN)
+
+$(Q4BIN): q4_gemv.c | bin
+	$(CC) $(CFLAGS) -o $@ $< $(LDLIBS)

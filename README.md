@@ -67,31 +67,70 @@ Plus 24/24 closed-form invariants.
 
 ---
 
-## What this harness does *not* show
+## Does quantization actually make it faster? (`kernels/q4_gemv.c`)
 
-Read this before anyone quotes a speedup.
+Everything in E1–E7 validates the *model*. Only this benchmark tests the
+*improvement*, because a reduced bit rate becomes reduced time only if a
+kernel keeps weights packed and dequantizes inside the inner loop. Three
+weight encodings, identical logical shapes, all hand-vectorized with NEON,
+batch-1 decode (`y = Wx`, each weight loaded once and used once):
 
-**There is no end-to-end tokens/sec measurement in this repo, on any
-hardware.** E7's "composite" is synthetic memory streams standing in for
-weight and KV traffic — it validates the *composition law*, not a running
-model. E5 quantizes real weights but dequantizes back to fp32 before
-evaluating, so it measures *accuracy only*.
+```bash
+make -C kernels q4 && ./kernels/bin/q4_gemv 8192 8192
+```
 
-The reason: **no 4-bit inference kernel exists yet.** Demonstrating the thesis
-requires a GEMV that keeps weights packed at 4.5 bpw and dequantizes on the
-fly in the inner loop, so a reduced bit rate actually becomes reduced memory
-traffic. That kernel is the product. Building it and benchmarking against an
-fp16 baseline is the largest remaining gap; until it exists this harness
-validates the *model* but cannot demonstrate the *improvement*.
+M2 Pro, 8192×8192 (256 MiB as fp32), single core:
 
-Also not established here:
+| encoding | bpw | GB/s | Gweights/s | vs fp16 |
+|---|---|---|---|---|
+| fp32 | 32.0 | **39.8** — at the DRAM roofline | 9.95 | 0.82× |
+| fp16 | 16.0 | 20.8 | **10.40** | 1.00× |
+| q4 (b=4, G=64) | 4.5 | 4.59 | 8.17 | **0.79×** |
 
+**On this machine 4-bit is slower than fp16.** The byte ratio is 3.56×, but
+only 22% of it converts into time. The table shows why: fp16 already runs
+compute-bound at 10.4 Gweights/s, needing just 20.8 GB/s out of a ~41 GB/s
+budget. Cutting bytes further buys nothing, while the unpack costs ~21%
+throughput.
+
+### The crossover — the number that decides whether the thesis applies
+
+Each encoding runs at `min(beta_DRAM / bytes_per_weight, pi_encoding)`. q4
+beats fp16 only where fp16 has gone memory-bound *below* q4's compute ceiling:
+
+```
+beta_DRAM / 2  <  pi_q4     =>     beta_DRAM  <  2 * pi_q4  =  16.3 GB/s
+```
+
+| host | per-core DRAM β | verdict |
+|---|---|---|
+| Apple M2 Pro (measured) | ~41 GB/s | **q4 loses** — 0.79× |
+| Sapphire Rapids (monograph §4.1) | ~8.5 GB/s | **q4 wins** — projected **1.92×** |
+
+The thesis is not wrong; it is *conditional*, and the condition is
+quantitative and now checkable with one command. A machine benefits from
+sub-fp16 weights only if its per-core DRAM bandwidth is below ~16 GB/s.
+Apple Silicon's unified memory sits far above that line; a bandwidth-starved
+many-core Xeon sits well below it — which is exactly the machine the
+monograph argues about.
+
+Treat 1.92× as indicative, not measured: it splices this host's compute rates
+onto the Xeon's bandwidth. On real Sapphire Rapids the unpack would use
+AVX-512/VNNI rather than NEON, so `pi_q4` — and the speedup — could be
+higher. Only running there settles it.
+
+## What this harness still does *not* show
+
+- **A full decode loop.** `q4_gemv` covers the GEMV that dominates batch-1
+  decode, not an end-to-end transformer with attention and KV traffic. E7's
+  composite is synthetic streams; E5 dequantizes to fp32 and measures
+  accuracy only.
 - **The §6.2 counter methodology.** The `perf_event_open` backend is written
   but has never executed — macOS has no PMU. Event encodings in
   `kernels/ostir_kernel.c` are transcribed Intel values, unverified on
   hardware. See `docs/COUNTERS.md`.
 - **AMX predictions.** `n_b* ≈ 18` follows from AMX INT8 peak; this host has
-  no AMX, so its measured `n_b* = 4.5` is not comparable.
+  none, so its measured `n_b* = 4.5` is not comparable.
 
 ---
 
